@@ -65,11 +65,14 @@ class Assignment(db.Model):
         assertions.assert_found(assignment, 'No assignment with this id was found')
         assertions.assert_valid(assignment.student_id == auth_principal.student_id, 'This assignment belongs to some other student')
         assertions.assert_valid(assignment.content is not None, 'assignment with empty content cannot be submitted')
-
-        assignment.teacher_id = teacher_id
-        db.session.flush()
-
-        return assignment
+        if assignment.state==AssignmentStateEnum.DRAFT:
+            assignment.teacher_id = teacher_id
+            assignment.state=AssignmentStateEnum.SUBMITTED
+            db.session.flush()
+            db.session.commit()
+            return assignment
+        else:
+            return None
 
 
     @classmethod
@@ -77,8 +80,9 @@ class Assignment(db.Model):
         assignment = Assignment.get_by_id(_id)
         assertions.assert_found(assignment, 'No assignment with this id was found')
         assertions.assert_valid(grade is not None, 'assignment with empty grade cannot be graded')
-
-        assignment.grade = grade
+        if assignment.teacher_id != auth_principal.teacher_id and (assignment.state == AssignmentStateEnum.SUBMITTED or assignment.state == AssignmentStateEnum.GRADED):
+            return None
+        assignment.grade = AssignmentGradeSchema.grade
         assignment.state = AssignmentStateEnum.GRADED
         db.session.flush()
 
@@ -89,5 +93,25 @@ class Assignment(db.Model):
         return cls.filter(cls.student_id == student_id).all()
 
     @classmethod
+    def update_grade(cls, assignment_id,grade):
+        student=cls.filter(cls.id == assignment_id).first()
+        
+        if( student.state==AssignmentStateEnum.DRAFT):
+            return 400,"Not graded"
+        else:
+            student.grade=grade
+            student.state=AssignmentStateEnum.GRADED
+            db.session.flush()
+            db.session.commit()
+            student=cls.filter(cls.id == assignment_id).first()
+            return 200,student
+
+    @classmethod
     def get_assignments_by_teacher(cls, teacher_id):
-        return cls.filter(cls.teacher_id == teacher_id).all()
+        return cls.filter(cls.teacher_id == teacher_id,cls.state != AssignmentStateEnum.DRAFT).all()
+
+    @classmethod
+    def get_graded_assignments(cls):
+        return cls.filter(cls.state == AssignmentStateEnum.GRADED).all()
+
+    
